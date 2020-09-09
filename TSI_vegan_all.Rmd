@@ -1,0 +1,2254 @@
+---
+title: "Scripts associated with mantel tests"
+author: "Schmidt-Swan et al. 2020"
+output:
+  html_document: default
+  pdf_document: default
+  chunk_output_type: console
+---
+
+Scripts associated with conducting mantel tests (vegan package) for investigating relationships between geographic and genetic distance of individuals on the same island. 
+
+Data:
+<i>Aedes albopictus</i> collected across 12 islands in the Torres Strait, Australia over 10 days in April-May 2018.
+See Schmidt et al. (2020) Methods and materials for more information about collections, genotyping and filtering.
+"For analysis within the TSI, we were cautious to avoid filtering bias caused by close kin and uneven samples sizes. Accordingly, we produced datasets of n = 22 for each community and for the whole region, with 22 the maximum number of genotypes that ensured equal sample sizes after removing close kin within and across islands. Kin were removed in order of missing data, other genotypes were removed to retain the largest possible geographical distribution of genotypes. Each dataset was imputed and phased with Beagle and hereafter referred to as the “n=22” datasets.
+
+Preliminaries:
+1. Make sure all required R packages are installed and loaded.
+2. Three files are needed: 1) SNP data "tsi_only2018.vcf" 2) Population map "tsi_only2018.txt" 3) Geographic coordinates of individuals ""
+3. Data can be accessed from: (include when published).
+4. Set an appropriate working directory where the dataset will be stored.
+
+Notes:
+"tsi_only2018.vcf" contains 22 individuals over 12 islands. Temporal sampling of Masig-2019 is excluded in this analysis.
+
+Useful links:
+https://datascienceplus.com/how-to-import-multiple-csv-files-simultaneously-in-r-and-create-a-data-frame/
+https://cran.r-project.org/web/packages/vcfR/vignettes/converting_data.html
+
+```{r installing packages, include=FALSE}
+
+#install vcfR and load other packages
+
+#install.packages("vcfR")
+library("vcfR")
+library("vegan")
+library("poppr")
+library("pegas")
+library("ape")
+library("adegenet")
+library("ade4")
+#install.packages("MASS")
+library("MASS")
+#install.packages("PBSmapping")
+library("PBSmapping")
+library("plotly")
+#install.packages("rgdal")
+library("rgdal")
+library("sp")
+library("genepop")
+library("geosphere")
+library("tidyverse")
+library("plyr")
+library("dplyr")
+library("rmarkdown")
+library("ggpubr")
+library("plotly")
+library("psych")
+library("sjPlot")
+library("gridExtra")
+library("rstatix")
+library("readr")
+```
+
+Importing in Badu vcf files
+
+```{r eval= FALSE}
+
+vcf_Badu <- read.vcfR(file = "badu22.phasimp.recode.vcf", verbose = F)
+
+#vcf_Badu <- read.vcfR("badu22.phasimp.recode.vcf", verbose = F)
+str(vcf_Badu)
+View(vcf_Badu)
+dim(vcf_Badu)
+
+#generating genid objects
+
+Badu_genid <- vcfR2genind(vcf_Badu)
+
+#this file is now genid format.
+class(vcf_Badu)
+vcf_Badu
+
+#examining the data
+#22 samples
+#229 CHROMs
+#9,149 variants
+#Object size: 3.3 Mb
+#0 percent missing data
+```
+
+Rousset's a calculation Badu
+
+ 
+```{r}
+#calculated in Spagedi
+
+#make this in columunar format.
+Badu_rousset_a <- read.table("Badu_rousseta.txt", header = T)
+class(Badu_rousset_a)
+str(Badu_rousset_a)
+Badu_rousset_a_matrix <- as.matrix(Badu_rousset_a)
+str(Badu_rousset_a_matrix)
+
+#dist format for the mantel test:
+
+dist_Badu_rousset_a_matrix <- as.dist(Badu_rousset_a_matrix)
+```
+
+```{r}
+#import Badu_geo_latlong.txt
+
+Baduindtest <- read.delim("Badu_geo.txt", header = F)
+
+row.names(Baduindtest) <- Baduindtest$V1
+Baduindtest <- Baduindtest[,-1]
+
+Baduindtest <- cbind(Baduindtest$V2,Baduindtest$V3)
+
+#regular dist
+dist_Baduindtest <- distm(Baduindtest)
+View(dist_Baduindtest)
+plot(dist_Baduindtest)
+
+#haversine dist - use this one
+
+dist_Baduindtest_haversine <- distm(Baduindtest, fun = distHaversine)
+View(dist_Baduindtest_haversine)
+plot(dist_Baduindtest_haversine)
+
+dist_Baduindtest_haversine_matrix <- as.matrix(dist_Baduindtest_haversine)
+#log Haversine
+
+log_dist_Baduindtest_haversine <- log(dist_Baduindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Baduindtest_haversine[which(!is.finite(log_dist_Baduindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Baduindtest_haversine <- as.dist(log_dist_Baduindtest_haversine)
+str(dist_log_dist_Baduindtest_haversine)
+hist(dist_log_dist_Baduindtest_haversine)
+summary(dist_log_dist_Baduindtest_haversine)
+
+dist_log_dist_Baduindtest_haversine_matrix <- as.matrix(dist_log_dist_Baduindtest_haversine)
+View(dist_log_dist_Baduindtest_haversine_matrix)
+```
+Badu22 mantel test
+
+```{r}
+#genetic is dist_Badu_rousset_a_matrix
+#Geo is dist_log_dist_Baduindtest_haversine
+
+Badu22_mantel <- mantel.randtest(dist_Badu_rousset_a_matrix, dist_log_dist_Baduindtest_haversine, nrepet = 99999)
+summary(Badu22_mantel)
+
+
+#scatter
+vect_Badu_rousseta <- as.vector(dist_Badu_rousset_a_matrix)
+vect_Badu_geo <- as.vector(dist_log_dist_Baduindtest_haversine)
+
+#route this to the data. Combine data together in new dataframe.
+
+Badu22_geo_gen_df <- data.frame(vect_Badu_rousseta,vect_Badu_geo)
+str(Badu22_geo_gen_df)
+describe(Badu22_geo_gen_df)
+library(ggplot2)
+Badu22_scatter <- ggplot(Badu22_geo_gen_df, aes(y = vect_Badu_rousseta, x = vect_Badu_geo)) + labs(y="Rousset's a", x = "Geographical distance (natural log)", title = "Badu Island Mantel Test") + geom_point() + geom_smooth(method = "lm")
+Badu22_scatter
+
+#write a function to plot stats on this graph
+
+ggplotRegression_Badu <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Badu Island Mantel Test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+Badu22_lm <- lm(vect_Badu_rousseta~vect_Badu_geo)
+summary(Badu22_lm)
+ggplotRegression_Badu(Badu22_lm)
+ggplotly() %>% layout(title = paste0("Badu Island Mantel Test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = -0.0028, Intercept = 0.24, Slope = -0.0034, p = 0.55',
+                                    '</sup>'))
+#transcribe values from the summary().
+#save as html and save as a png
+
+#linear model
+Badu22_lm <- lm(vect_Badu_rousseta~vect_Badu_geo)
+summary(Badu22_lm)
+
+#saved as html
+#there appears to be no isolation by distance. This is congrugent with the Badu-local observations (effectively the same mantel, but with rousset's a instead).
+```
+
+Badu rousset's at <50m vs rousset's a >500m
+
+```{r}
+#genetic is dist_Badu_rousset_a_matrix
+#geo is dist_log_dist_Baduindtest_haversine
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+log(500)
+log(50)
+Badu_geo_m <- as.vector(dist_log_dist_Baduindtest_haversine)
+
+m_Badu22_geo_gen_df <- data.frame(vect_Badu_rousseta,Badu_geo_m)
+
+Badu_subset_test_lower <- subset(Badu22_geo_gen_df, vect_Badu_geo < 3.912023)
+Badu_subset_test_upper <- subset(Badu22_geo_gen_df, vect_Badu_geo > 6.214608)
+
+Badu_table_lower <- describe(Badu_subset_test_lower$vect_Badu_rousseta)
+View(Badu_table_lower)
+
+Badu_table_upper <- describe(Badu_subset_test_upper$vect_Badu_rousseta)
+View(Badu_table_upper)
+
+Badu_new_df_roussets_a_distance <- bind_rows(Badu_table_lower,Badu_table_upper)
+
+tab_df(Badu_new_df_roussets_a_distance, title = "Badu rousset's a variation with distance", file = "Badu data table test.doc")
+
+```
+
+```{r Badu22 NS}
+test_Badu22_lm <- lm(formula = vect_Badu_rousseta~vect_Badu_geo)
+
+summary.lm(test_Badu22_lm)
+confint.lm(test_Badu22_lm, level = 0.95)
+Badu22_coefficient <- test_Badu22_lm$coefficients[2]
+View(test_Badu22_lm$coefficients[2])
+
+#the slope is slightly negative, which you can see in the mantel test. The slope is slightly negative. As confirmed in the above mantel test, geographic distance likely has no effect on genetic distance (no evidence of IBD). 
+# slope is b. Therefore b^-1, so you find the neighbourhood area by dividing one by the slope: 
+Badu22_NS <- 1/(0.003439482)
+
+#this suggests that the NS is -290 individuals. Not appropriate to calculate NS for Badu.
+
+#95% confidence intervals
+Badu22_CIs1 <- 1/0.01490409
+View(Badu22_CIs1)
+
+Badu22CI2 <- 1/0.00802513
+View(Badu22CI2)
+
+```
+
+```{r importing in Keriri, eval=FALSE}
+
+vcf_Keriri <- read.vcfR("keriri22.phasimp.recode.vcf", verbose = F)
+View(vcf_Keriri)
+dim(vcf_Keriri)
+
+#generating genid objects
+
+Keriri_genid <- vcfR2genind(vcf_Keriri)
+
+#this file is now genid format.
+class(vcf_Keriri)
+vcf_Keriri
+
+#***** Object of Class vcfR *****
+#22 samples
+#227 CHROMs
+#8,799 variants
+#Object size: 3.2 Mb
+#0 percent missing data
+#*****        *****         *****
+
+```
+
+```{r Roussets a Keriri}
+#calculated in Spagedi
+
+#make this in columunar format.
+
+Keriri_rousset_a <- read.table("Keriri_rousseta.txt")
+class(Keriri_rousset_a)
+str(Keriri_rousset_a)
+Keriri_rousset_a_matrix <- as.matrix(Keriri_rousset_a)  
+
+#dist format
+
+dist_Keriri_rousset_a_matrix <- as.dist(Keriri_rousset_a_matrix)
+
+```
+
+```{r geosphere Keriri}
+#import Badu_geo_latlong.txt
+
+Keririindtest <- read.delim("Keriri_geo.txt", header = F)
+
+row.names(Keririindtest) <- Keririindtest$V1
+Keririindtest <- Keririindtest[,-1]
+
+Keririindtest <- cbind(Keririindtest$V2,Keririindtest$V3)
+
+#regular dist
+dist_Keririindtest <- distm(Keririindtest)
+View(dist_Keririindtest)
+plot(dist_Keririindtest)
+
+#haversine dist - use this one
+
+dist_Keririindtest_haversine <- distm(Keririindtest, fun = distHaversine)
+View(Keririindtest)
+plot(Keririindtest)
+
+#log Haversine
+
+log_dist_Keririindtest_haversine <- log(dist_Keririindtest_haversine)
+plot(log_dist_Keririindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Keririindtest_haversine[which(!is.finite(log_dist_Keririindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Keririindtest_haversine <- as.dist(log_dist_Keririindtest_haversine)
+str(dist_log_dist_Keririindtest_haversine)
+hist(dist_log_dist_Keririindtest_haversine)
+summary(dist_log_dist_Keririindtest_haversine)
+
+```
+
+```{r Keriri22 mantel test}
+#genetic is dist_Keriri_rousset_a_matrix
+#geo is dist_log_dist_Keririindtest_haversine
+
+Keriri22_mantel <- mantel.randtest(dist_Keriri_rousset_a_matrix, dist_log_dist_Keririindtest_haversine, nrepet = 99999)
+Keriri22_mantel
+
+#scatter
+vect_Keriri_rousseta <- as.vector(dist_Keriri_rousset_a_matrix)
+vect_Keriri_geo <- as.vector(dist_log_dist_Keririindtest_haversine)
+
+#combine to a new dataframe
+
+Keriri22_geo_gen_df <- data.frame(vect_Keriri_rousseta,vect_Keriri_geo)
+str(Keriri22_geo_gen_df)
+
+library(ggplot2)
+Keriri22_scatter <- ggplot(Keriri22_geo_gen_df, aes(y= vect_Keriri_rousseta, x= vect_Keriri_geo)) + labs(y="Rousset's a", x = "Geographical distance (natural log)", title = "Keriri Island Mantel Test") + geom_point() + geom_smooth(method = "lm")
+Keriri22_scatter
+ggplotly()
+
+#write a function to plot stats on this graph
+
+ggplotRegression_Keriri <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Keriri Island Mantel Test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+Keriri22lm <- lm(formula = vect_Keriri_rousseta~vect_Keriri_geo)
+summary(Keriri22lm)
+ggplotRegression_Keriri(Keriri22lm)
+ggplotly() %>% layout(title = paste0("Keriri Island Mantel Test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.0000095, Intercept = 0.24, Slope = -0.0052, p = 0.32',
+                                    '</sup>'))
+#transcribe values from the summary().
+#save as html and save as a png
+
+
+Keriri22lm <- lm(formula = vect_Keriri_rousseta~vect_Keriri_geo)
+summary(Keriri22lm)
+
+#there appears to be no ibd. The angle of the slope is negative. individuals are on the whole genetically alike.
+```
+
+```{r Keriri roussets at <50m vs roussets a >500m}
+library("psych")
+#genetic is dist_Keriri_rousset_a_matrix
+#geo is dist_log_dist_Keririindtest_haversine
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_keriri22_geo_gen_df <- data.frame(vect_Keriri_rousseta,vect_Keriri_geo)
+
+keriri_subset_test_lower <- subset(m_keriri22_geo_gen_df, vect_Keriri_geo < 3.912023)
+keriri_subset_test_upper <- subset(m_keriri22_geo_gen_df, vect_Keriri_geo > 6.214608)
+
+keriri_table_lower <- describe(keriri_subset_test_lower$vect_Keriri_rousseta)
+View(keriri_table_lower)
+keriri_table_upper <- describe(keriri_subset_test_upper$vect_Keriri_rousseta)
+View(keriri_table_upper)
+
+keriri_new_df_roussets_a_distance <- bind_rows(keriri_table_lower,keriri_table_upper)
+
+tab_df(keriri_new_df_roussets_a_distance, title = "Keriri rousset's a variation with distance", file = "Keriri data table test.doc")
+```
+
+```{r Keriri22 NS}
+summary.lm(Keriri22lm)
+confint.lm(Keriri22lm, level = 0.95)
+Keriri22_coefficient <- Keriri22lm$coefficients[2]
+#-0.01543581 and 0.005035049
+View(Keriri22_coefficient)
+
+#again the slope is negative. which you can see in the mantel test. The slope is slightly negative. As confirmed in the above mantel test, geographic distance likely has no effect on genetic distance (no evidence of IBD). 
+# slope is b. Therefore b^-1, so you find the neighbourhood area by dividing one by the inverse slope: 
+
+Keriri22_NS <- 1/0.00520038
+#192 individuals
+
+#95% confidence intervals
+Keriri22_CIs1 <- 1/-0.01543581
+View(Keriri22_CIs1)
+
+Keriri22CI2 <- 1/0.005035049
+View(Keriri22CI2)
+
+#Neighbourhood size is 192 (-64 - 198). But little confidence can be said about this value owing to the fact that the slope goes through 0. 
+
+```
+
+```{r Importing Masig18, eval=FALSE}
+vcf_Masig18 <- read.vcfR("masig22.phasimp.recode.vcf", verbose = F)
+View(vcf_Masig18)
+dim(vcf_Masig18)
+
+#generating genid objects
+
+Masig18_genid <- vcfR2genind(vcf_Masig18)
+
+#this file is now genid format.
+class(vcf_Masig18)
+vcf_Masig18
+
+#> vcf_Masig18
+#***** Object of Class vcfR *****
+#22 samples
+#216 CHROMs
+#9,091 variants
+#Object size: 3.3 Mb
+#0 percent missing data
+```
+
+```{r Roussets a Masig18}
+#calculated in Spagedi
+
+#make this in columunar format.
+
+masig18_rousset_a <- read.table("Masig18_rousseta.txt")
+class(masig18_rousset_a)
+str(masig18_rousset_a)
+masig18_rousset_a_matrix <- as.matrix(masig18_rousset_a)  
+
+#dist format
+
+dist_masig18_rousset_a_matrix <- as.dist(masig18_rousset_a_matrix)
+
+```
+
+```{r geosphere Masig18}
+Masgi18indtest <- read.delim("Masig_geo.txt", header = F)
+
+row.names(Masgi18indtest) <- Masgi18indtest$V1
+Masgi18indtest <- Masgi18indtest[,-1]
+
+Masgi18indtest <- cbind(Masgi18indtest$V2,Masgi18indtest$V3)
+
+#regular dist
+dist_Masgi18indtest <- distm(Masgi18indtest)
+View(dist_Masgi18indtest)
+plot(dist_Masgi18indtest)
+
+#haversine dist - use this one
+
+dist_Masgi18indtest_haversine <- distm(Masgi18indtest, fun = distHaversine)
+View(dist_Masgi18indtest_haversine)
+plot(dist_Masgi18indtest_haversine)
+
+#log Haversine
+
+log_dist_Masgi18indtest_haversine <- log(dist_Masgi18indtest_haversine)
+plot(log_dist_Masgi18indtest_haversine)
+
+#change -Inf to 0 
+log_dist_Masgi18indtest_haversine[which(!is.finite(log_dist_Masgi18indtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Masgi18indtest_haversine <- as.dist(log_dist_Masgi18indtest_haversine)
+str(dist_log_dist_Masgi18indtest_haversine)
+hist(dist_log_dist_Masgi18indtest_haversine)
+summary(dist_log_dist_Masgi18indtest_haversine)
+
+```
+
+```{r Masig18 mantel test}
+#genetic is dist_masig18_rousset_a_matrix
+# geographic is dist_log_dist_Masgi18indtest_haversine
+
+Masig22_mantel <- mantel.randtest(dist_masig18_rousset_a_matrix, dist_log_dist_Masgi18indtest_haversine, nrepet = 99999)
+Masig22_mantel
+
+#scatter
+vect_Masig18_gen <- as.vector(dist_masig18_rousset_a_matrix)
+vect_Masig_geo <- as.vector(dist_log_dist_Masgi18indtest_haversine)
+
+#combine
+Masig22_geo_gen_df <- data.frame(vect_Masig18_gen,vect_Masig_geo)
+str(Masig22_geo_gen_df)
+
+library(ggplot2)
+Masig22_scatter <- ggplot(Masig22_geo_gen_df, aes(y=vect_Masig18_gen, x= vect_Masig_geo)) + labs(y="Roussets a", x= "Geographical distance (natural log)", title = "Masig Island (2018) Mantel test") + geom_point() + geom_smooth(method = "lm")
+Masig22_scatter
+ggplotly()
+
+Masig18_22_lm <- lm(formula = vect_Masig18_gen~vect_Masig_geo)
+summary(Masig18_22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotRegression_Masig18 <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Masig Island (2018) Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+Masig18_22_lm <- lm(formula = vect_Masig18_gen~vect_Masig_geo)
+summary(Masig18_22_lm)
+ggplotRegression_Masig18(Masig18_22_lm)
+ggplotly() %>% layout(title = paste0("Masig Island (2018) Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.0087, Intercept = 0.13, Slope = 0.0084, p = 0.08',
+                                    '</sup>'))
+#transcribe values from the summary().
+#save as html and save as a png
+
+#html produced
+#there appears to be a slight trend of potential ibd.
+```
+
+```{r Masig18_22 NS}
+summary.lm(Masig18_22_lm)
+confint.lm(Masig18_22_lm, level = 0.95)
+Masig18_22_lm_coefficient <- Masig18_22_lm$coefficients[2]
+
+#-0.001149983 0.01804338
+View(Masig18_22_lm_coefficient)
+
+#again the slope is slightly positive which you can see in the mantel test. The slope is slightly negative. As confirmed in the above mantel test, geographic distance likely has no minimal effect on genetic distance (little evidence of IBD). # slope is b. Therefore b^-1, so you find the neighbourhood area by dividing one by the inverse slope: 
+
+#the coefficient is: 0.008446699
+Masig18_22_NS <- 1/0.008446699
+#118 individuals
+
+#95% confidence intervals
+Masig18_22_CIs1 <- 1/-0.001149983
+View(Masig18_22_CIs1)
+
+Masig18_22_CI2 <- 1/0.01804338
+View(Masig18_22_CI2)
+
+#Neighbourhood size is 118 (-869 - 55). But little confidence can be said about this value owing to the fact that the slope goes through 0. 
+
+```
+
+```{r Masig Roussets a at <50m vs Roussets a >500m}
+#genetic is dist_masig18_rousset_a_matrix
+# geographic is dist_log_dist_Masgi18indtest_haversine
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+m_masig22_geo_gen_df <- data.frame(vect_Masig18_gen,vect_Masig_geo)
+
+masig_subset_test_lower <- subset(m_masig22_geo_gen_df, vect_Masig_geo < 3.912023)
+masig_subset_test_upper <- subset(m_masig22_geo_gen_df, vect_Masig_geo > 6.214608)
+
+Masig_lower <- describe(masig_subset_test_lower$vect_Masig18_gen)
+View(Masig_lower)
+
+Masig_upper <- describe(masig_subset_test_upper$vect_Masig18_gen)
+View(Masig_upper)
+
+masig_new_df_roussets_a_distance <- bind_rows(Masig_lower,Masig_upper)
+
+tab_df(masig_new_df_roussets_a_distance, title = "Masig18 rousset's a variation with distance", file = "Masig18 data table test.doc")
+
+```
+
+```{r import Erub vcf, eval=FALSE}
+vcf_Erub <- read.vcfR("erub22.phasimp.recode.vcf", verbose = F)
+View(vcf_Erub)
+dim(vcf_Erub)
+
+#generating genid objects
+
+Erub_genid <- vcfR2genind(vcf_Erub)
+
+#this file is now genid format.
+class(vcf_Erub)
+vcf_Erub
+
+#> vcf_Erub
+#***** Object of Class vcfR *****
+#22 samples
+#222 CHROMs
+#9,018 variants
+#Object size: 3.2 Mb
+#0 percent missing data
+```
+
+```{r Erub rousset_a}
+#calculated in Spagedi
+
+#make this in columunar format.
+
+erub_rousset_a <- read.table("Erub_rousset_a.txt")
+class(erub_rousset_a)
+str(erub_rousset_a)
+erub_rousset_a_matrix <- as.matrix(erub_rousset_a)  
+
+#dist format
+
+dist_erub_rousset_a_matrix <- as.dist(erub_rousset_a_matrix)
+
+```
+
+```{r Erub geosphere}
+Erubindtest <- read.delim("Erub_geo.txt", header = F)
+
+row.names(Erubindtest) <- Erubindtest$V1
+Erubindtest <- Erubindtest[,-1]
+
+Erubindtest <- cbind(Erubindtest$V2,Erubindtest$V3)
+
+#regular dist
+dist_Erubindtest <- distm(Erubindtest)
+View(dist_Erubindtest)
+plot(dist_Erubindtest)
+
+#haversine dist - use this one
+
+dist_Erubindtest_haversine <- distm(Erubindtest, fun = distHaversine)
+View(dist_Erubindtest_haversine)
+plot(dist_Erubindtest_haversine)
+
+#log Haversine
+
+log_dist_Erubindtest_haversine <- log(dist_Erubindtest_haversine)
+plot(log_dist_Erubindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Erubindtest_haversine[which(!is.finite(log_dist_Erubindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Erubindtest_haversine <- as.dist(log_dist_Erubindtest_haversine)
+str(dist_log_dist_Erubindtest_haversine)
+hist(dist_log_dist_Erubindtest_haversine)
+summary(dist_log_dist_Erubindtest_haversine)
+```
+
+```{r Erub mantel}
+#genetic "dist_erub_rousset_a_matrix"
+#geography "dist_log_dist_Erubindtest_haversine"
+
+Erubmantel22 <- mantel.randtest(dist_erub_rousset_a_matrix, dist_log_dist_Erubindtest_haversine, nrepet = 99999)
+Erubmantel22
+
+#scatter
+vect_Erub_gen <- as.vector(dist_erub_rousset_a_matrix)
+vect_Erub_geo <- as.vector(dist_log_dist_Erubindtest_haversine)
+
+#combine
+Erub22_geo_gen_df <- data.frame(vect_Erub_gen,vect_Erub_geo)
+str(Erub22_geo_gen_df)
+
+library(ggplot2)
+Erub22_scatter <- ggplot(Erub22_geo_gen_df, aes(y=vect_Erub_gen, x=vect_Erub_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)", title = "Erub Island Mantel Test") + geom_point() + geom_smooth(method = "lm")
+Erub22_scatter
+ggplotly()
+
+Erub22_lm <- lm(formula = vect_Erub_gen~vect_Erub_geo)
+summary(Erub22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotRegression_Erub <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Erub Island Mantel Test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotRegression_Erub(Erub22_lm)
+ggplotly() %>% layout(title = paste0("Erub Island Mantel Test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.01, Intercept = 0.15, Slope = 0.01, p = 0.04',
+                                    '</sup>'))
+
+#transcribe values from the summary().
+#save as html and save as a png
+
+#erub html produced.
+#this is significant. individuals further apart are more genetically distinct than individuals closer together. Much noise is present in the data however. 
+```
+
+```{r Erub NS}
+summary.lm(Erub22_lm)
+confint.lm(Erub22_lm, level = 0.95)
+Erub22_lm_coefficient <- Erub22_lm$coefficients[2]
+
+#0.0004286674 0.02480413
+View(Erub22_lm_coefficient)
+
+#the slope is slightly positive, which you can see in the mantel test. #slope is b. therefore b^-1
+
+#the coefficient is: 0.0126164
+Erub22_NS <- 1/0.0126164
+# 79 individuals
+
+#95% CIs
+Erub22_NS_CIs1 <- 1/0.0004286674
+#2,332 individuals
+
+Erub22_NS_CIs2 <- 1/0.02480413
+# 40 individuals
+#neighbourhood size is 79 with 95% CIs (40, 2,332). This is more reflective of an estimate of NS for Erub.
+```
+
+```{r Erub Roussets a at <50m vs Roussets a >500m}
+#Erub22_geo_gen_df <- data.frame(vect_Erub_gen,vect_Erub_geo)
+
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+
+
+m_Erub22_geo_gen_df <- data.frame(vect_Erub_gen,vect_Erub_geo)
+
+erub_subset_test_lower <- subset(m_Erub22_geo_gen_df, vect_Erub_geo < 3.912023)
+erub_subset_test_upper <- subset(m_Erub22_geo_gen_df, vect_Erub_geo > 6.214608)
+
+erub_lower <- describe(erub_subset_test_lower$vect_Erub_gen)
+View(erub_lower)
+
+erub_upper <- describe(erub_subset_test_upper$vect_Erub_gen)
+View(erub_upper)
+
+erub_new_df_roussets_a_distance <- bind_rows(erub_lower,erub_upper)
+
+tab_df(erub_new_df_roussets_a_distance, title = "Erub rousset's a variation with distance", file = "Erub data table test.doc")
+
+```
+
+```{r importing Mer22, eval=FALSE}
+vcf_mer <- read.vcfR("mer22.phasimp.recode.vcf", verbose = F)
+View(vcf_mer)
+dim(vcf_mer)
+
+#generating genid objects
+
+mer_genid <- vcfR2genind(vcf_mer)
+
+#this file is now genid format.
+class(vcf_mer)
+vcf_mer
+```
+
+```{r Mer rousset_a}
+#calculated in Spagedi
+
+#make this in columunar format.
+
+mer_rousset_a <- read.table("Mer_rousset_a.txt")
+class(mer_rousset_a)
+str(mer_rousset_a)
+mer_rousset_a_matrix <- as.matrix(mer_rousset_a)
+
+#dist format
+dist_mer_rousset_a_matrix <- as.dist(mer_rousset_a)
+```
+
+```{r Mer geosphere}
+Merindtest <- read.delim("Mer_geo.txt", header = F)
+
+row.names(Merindtest) <- Merindtest$V1
+Merindtest <- Merindtest[,-1]
+
+Merindtest <- cbind(Merindtest$V2,Merindtest$V3)
+
+#regular dist
+dist_Merindtest <- distm(Merindtest)
+View(dist_Merindtest)
+plot(dist_Merindtest)
+
+#haversine dist - use this one
+
+dist_Merindtest_haversine <- distm(Merindtest, fun = distHaversine)
+View(dist_Merindtest_haversine)
+plot(dist_Merindtest_haversine)
+
+#log Haversine
+
+log_dist_Merindtest_haversine <- log(dist_Merindtest_haversine)
+plot(log_dist_Merindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Merindtest_haversine[which(!is.finite(log_dist_Merindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Merindtest_haversine <- as.dist(log_dist_Merindtest_haversine)
+str(dist_log_dist_Merindtest_haversine)
+hist(dist_log_dist_Merindtest_haversine)
+summary(dist_log_dist_Merindtest_haversine)
+```
+
+```{r Mer mantel}
+#genetic "dist_mer_rousset_a_matrix"
+#geography "dist_log_dist_Merindtest_haversine"
+
+mermantel22 <- mantel.randtest(dist_mer_rousset_a_matrix, dist_log_dist_Merindtest_haversine, nrepet = 99999)
+mermantel22
+
+#scatter
+vect_Mer_gen <- as.vector(dist_mer_rousset_a_matrix)
+vect_Mer_geo <- as.vector(dist_log_dist_Merindtest_haversine)
+
+#combine
+Mer_geo_gen_df <- data.frame(vect_Mer_gen,vect_Mer_geo)
+str(Mer_geo_gen_df)
+
+library(ggplot2)
+Mer_scatter <- ggplot(Mer_geo_gen_df, aes(y=vect_Mer_gen, x=vect_Mer_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)", title = "Mer Island Mantel test") + geom_point() + geom_smooth(method = "lm")
+Mer_scatter
+ggplotly()
+
+mer22_lm <- lm(formula = vect_Mer_gen~vect_Mer_geo)
+summary(mer22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotRegression_Mer <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Mer Island Mantel Test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotRegression_Mer(mer22_lm)
+ggplotly() %>% layout(title = paste0("Mer Island Mantel Test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.0024, Intercept = 0.30, Slope = -0.0077, p = 0.21',
+                                    '</sup>'))
+
+#transcribe values from the summary().
+#save as html and save as a png
+
+#mer html produced
+#this is not significant. Very little is going on here - not significant. Not a good idea to calculate NS for a non-significant plot.
+
+```
+
+```{r Mer NS}
+summary.lm(mer22_lm)
+confint.lm(mer22_lm, level = 0.95)
+mer22_lm_coefficient <- mer22_lm$coefficients[2]
+#one CI is negative. 
+# -0.01984536 0.004406757
+
+View(mer22_lm_coefficient)
+# slope is -0.007719301.
+
+Mer22_NS <- 1/-0.007719301
+#-129 individuals. This doesn't make sense.
+
+```
+
+```{r Mer Roussets at <50m vs Roussets a >500m}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+log(50) # - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+log(500) #log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_mer22_geo_gen_df <- data.frame(vect_Mer_gen,vect_Mer_geo)
+
+mer_subset_test_lower <- subset(m_mer22_geo_gen_df, vect_Mer_geo < 3.912023)
+mer_subset_test_upper <- subset(m_mer22_geo_gen_df, vect_Mer_geo > 6.214608)
+
+mer_table_lower <- describe(mer_subset_test_lower$vect_Mer_gen)
+View(mer_table_lower)
+mer_table_upper <- describe(mer_subset_test_upper$vect_Mer_gen)
+View(mer_table_upper)
+
+Mer_new_df_roussets_a_distance <- bind_rows(mer_table_lower,mer_table_upper)
+
+tab_df(Mer_new_df_roussets_a_distance, title = "Mer rousset's a variation with distance", file = "Mer data table test.doc")
+```
+
+```{r import vcf Warraber, eval=FALSE}
+vcf_warraber <- read.vcfR("warraber22.phasimp.recode.vcf", verbose = F)
+View(vcf_warraber)
+dim(vcf_warraber)
+
+warraber_genid <- vcfR2genind(vcf_warraber)
+class(vcf_warraber)
+vcf_warraber
+
+#> vcf_warraber
+#***** Object of Class vcfR *****
+#22 samples
+#220 CHROMs
+#8,652 variants
+#Object size: 3.1 Mb
+#0 percent missing data
+
+```
+
+```{r Warraber Roussets a}
+#calculated in Spagedi
+
+#make this in columunar format.
+
+warraber_rousset_a <- read.table("Warraber_rousset_a.txt")
+class(warraber_rousset_a)
+str(warraber_rousset_a)
+warraber_rousset_a_matrix <- as.matrix(warraber_rousset_a)
+
+#dist format
+dist_warraber_rousset_a_matrix <- as.dist(warraber_rousset_a)
+```
+
+```{r Warraber geosphere}
+Warraberindtest <- read.delim("Warraber_geo.txt", header =F)
+
+row.names(Warraberindtest) <- Warraberindtest$V1
+Warraberindtest <- Warraberindtest[,-1]
+
+Warraberindtest <- cbind(Warraberindtest$V2,Warraberindtest$V3)
+
+#regular dist
+dist_Warraberindtest <- distm(Warraberindtest)
+View(dist_Warraberindtest)
+plot(dist_Warraberindtest)
+
+#haversine dist - use this one
+
+dist_Warraberindtest_haversine <- distm(Warraberindtest, fun = distHaversine)
+View(dist_Warraberindtest_haversine)
+plot(dist_Warraberindtest_haversine)
+
+#log Haversine
+
+log_dist_Warraberindtest_haversine <- log(dist_Warraberindtest_haversine)
+plot(log_dist_Warraberindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Warraberindtest_haversine[which(!is.finite(log_dist_Warraberindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Warraberindtest_haversine <- as.dist(log_dist_Warraberindtest_haversine)
+str(dist_log_dist_Warraberindtest_haversine)
+hist(dist_log_dist_Warraberindtest_haversine)
+summary(dist_log_dist_Warraberindtest_haversine)
+```
+
+```{r Warraber mantel}
+#genetic is "dist_warraber_rousset_a_matrix"
+#geo is "dist_log_dist_Warraberindtest_haversine"
+
+warrabermantel_22 <- mantel.randtest(dist_warraber_rousset_a_matrix,dist_log_dist_Warraberindtest_haversine, nrepet = 99999)
+warrabermantel_22
+
+#this p value is what you want.
+
+#scatter
+vect_Warraber_gen <- as.vector(dist_warraber_rousset_a_matrix)
+vect_Warraber_geo <- as.vector(dist_log_dist_Warraberindtest_haversine)
+
+#combine
+Warraber_geo_gen_df <- data.frame(vect_Warraber_gen, vect_Warraber_geo)
+str(Warraber_geo_gen_df)
+
+library(ggplot2)
+warraber_scatter <- ggplot(Warraber_geo_gen_df, aes(y = vect_Warraber_gen, x=vect_Warraber_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)", title = "Warraber Island Mantel test") + geom_point() + geom_smooth(method = "lm") #+ geom_text(aes(3,40, label = paste(("Adj R2 = ", adj.r.squared, "\n", "Intercept =",intercept, "\n", "Slope =", slope, "\n", "P =", pvalue)))
+                                                                                                                                                      
+warraber_scatter
+ggplotly()
+
+warraber22_lm <- lm(formula = vect_Warraber_gen~vect_Warraber_geo)
+summary(warraber22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotregression_warraber <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Warraber Island Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotregression_warraber(warraber22_lm)
+ggplotly() %>% layout(title = paste0("Warraber Island Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.028, Intercept = 0.15, Slope = 0.012, p = 0.005',
+                                    '</sup>'))
+
+#transcribe values from the summary().
+#save as html and save as a png
+
+#asj.r.squared <- map_dbl(warraber22_lm$)
+#html produced
+#this is highly significant. There appears to be significant isolation by distance on Warraber. Interesting (could this be because of a migrant)?
+
+#0.05/12
+
+```
+
+```{r Warraber NS}
+summary.lm(warraber22_lm)
+confint.lm(warraber22_lm, level = 0.95)
+#confidence intervals = #0.00366618, 0.02134667
+warraber22_lm_coefficient <- warraber22_lm$coefficients[2]
+
+View(warraber22_lm_coefficient)
+# slope is 0.01250643
+
+Warraber22_NS <- 1/0.01250643
+View(Warraber22_NS)
+#80 individuals (rounded up).
+
+#95% CIs
+
+Warraber22_NS_CIs1 <- 1/0.00366618
+View(Warraber22_NS_CIs1)
+#272.7635
+
+Warraber22_NS_CIs2 <- 1/0.02134667
+View(Warraber22_NS_CIs2)
+#46.68.
+
+#NS is 80 individuals (46, 272 95% CIs)
+
+```
+
+```{r Warraber Roussets at <50m vs Roussets a >500m}
+library("psych")
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_warraber22_geo_gen_df <- data.frame(vect_Warraber_gen,vect_Warraber_geo)
+
+warraber_subset_test_lower <- subset(m_warraber22_geo_gen_df, vect_Warraber_geo < 3.912023)
+warraber_subset_test_upper <- subset(m_warraber22_geo_gen_df, vect_Warraber_geo > 6.214608)
+
+warraber_table_lower <- describe(warraber_subset_test_lower$vect_Warraber_gen)
+View(warraber_table_lower)
+warraber_table_upper <- describe(warraber_subset_test_upper$vect_Warraber_gen)
+View(warraber_table_upper)
+
+warraber_new_df_roussets_a_distance <- bind_rows(warraber_table_lower,warraber_table_upper)
+
+tab_df(warraber_new_df_roussets_a_distance, title = "warraber rousset's a variation with distance", file = "warraber data table test.doc")
+```
+
+```{r vcf Poruma, eval=FALSE}
+vcf_poruma <- read.vcfR("poruma22.phasimp.recode.vcf", verbose = F)
+View(vcf_poruma)
+dim(vcf_poruma)
+
+poruma_genid <- vcfR2genind(vcf_poruma)
+class(vcf_poruma)
+vcf_poruma
+
+#***** Object of Class vcfR *****
+#22 samples
+#228 CHROMs
+#8,734 variants
+#Object size: 3.1 Mb
+#0 percent missing data
+
+```
+
+```{r Poruma rousset_a}
+poruma_rousset_a <- read.table("Poruma_rousset_a.txt")
+class(poruma_rousset_a)
+
+poruma_rousset_a_matrix <- as.matrix(poruma_rousset_a)
+
+#dist format
+dist_poruma_rousset_a_matrix <- as.dist(poruma_rousset_a)
+```
+
+```{r Poruma geosphere}
+Porumaindtest <- read.delim("Poruma_geo.txt", header = F)
+
+row.names(Porumaindtest) <- Porumaindtest$V1
+Porumaindtest <- Porumaindtest[,-1]
+
+Porumaindtest <- cbind(Porumaindtest$V2,Porumaindtest$V3)
+
+#regular dist
+dist_Porumaindtest <- distm(Porumaindtest)
+View(dist_Porumaindtest)
+plot(dist_Porumaindtest)
+
+#haversine dist - use this one
+
+dist_Porumaindtest_haversine <- distm(Porumaindtest, fun = distHaversine)
+View(dist_Porumaindtest_haversine)
+plot(dist_Porumaindtest_haversine)
+
+#log Haversine
+
+log_dist_Porumaindtest_haversine <- log(dist_Porumaindtest_haversine)
+plot(log_dist_Porumaindtest_haversine)
+
+#change -Inf to 0 
+log_dist_Porumaindtest_haversine[which(!is.finite(log_dist_Porumaindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_Porumaindtest_haversine <- as.dist(log_dist_Porumaindtest_haversine)
+str(dist_log_dist_Porumaindtest_haversine)
+hist(dist_log_dist_Porumaindtest_haversine)
+summary(dist_log_dist_Porumaindtest_haversine)
+
+```
+
+```{r poruma mantel}
+#genetic is "dist_poruma_rousset_a_matrix"
+#geo is "dist_log_dist_Porumaindtest_haversine"
+
+Poruma22_mantel <- mantel.randtest(dist_poruma_rousset_a_matrix,dist_log_dist_Porumaindtest_haversine, nrepet = 99999)
+Poruma22_mantel
+
+#scatter
+vect_Poruma_gen <- as.vector(dist_poruma_rousset_a_matrix)
+vect_Poruma_geo <- as.vector(dist_log_dist_Porumaindtest_haversine)
+
+#combine
+Poruma_geo_gen_df <- data.frame(vect_Poruma_gen, vect_Poruma_geo)
+str(Poruma_geo_gen_df)
+
+library(ggplot2)
+Poruma_scatter <- ggplot(Poruma_geo_gen_df, aes(y = vect_Poruma_gen, x=vect_Poruma_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)", title ="Poruma Island Mantel test") + geom_point() + geom_smooth(method = "lm")
+Poruma_scatter
+ggplotly()
+
+#The line is pretty much flat. No evidence of IBD here (p value is 0.77)
+
+poruma22_lm <- lm(formula = vect_Poruma_gen~vect_Poruma_geo)
+summary(poruma22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotregression_poruma <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Poruma Island Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotregression_poruma(poruma22_lm)
+ggplotly() %>% layout(title = paste0("Poruma Island Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = -0.003, Intercept = 0.18, Slope = 0.001, p = 0.77',
+                                    '</sup>'))
+
+#html produced
+```
+
+```{r poruma Roussets at <50m vs Roussets a >500m}
+library("psych")
+
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_poruma22_geo_gen_df <- data.frame(vect_Poruma_gen,vect_Poruma_geo)
+
+poruma_subset_test_lower <- subset(m_poruma22_geo_gen_df, vect_Poruma_geo < 3.912023)
+poruma_subset_test_upper <- subset(m_poruma22_geo_gen_df, vect_Poruma_geo > 6.214608)
+
+poruma_table_lower <- describe(poruma_subset_test_lower$vect_Poruma_gen)
+View(poruma_table_lower)
+poruma_table_upper <- describe(poruma_subset_test_upper$vect_Poruma_gen)
+View(poruma_table_upper)
+
+poruma_new_df_roussets_a_distance <- bind_rows(poruma_table_lower,poruma_table_upper)
+
+tab_df(poruma_new_df_roussets_a_distance, title = "poruma rousset's a variation with distance", file = "poruma data table test.doc")
+```
+
+```{r vcf Masig19, eval=FALSE}
+vcfMasig19 <- read.vcfR("masig2019.22.phasimp.recode.vcf", verbose = F)
+View(vcfMasig19)
+
+masig19_22_genid <- vcfR2genind(vcfMasig19)
+class(vcfMasig19)
+vcfMasig19
+
+#***** Object of Class vcfR *****
+#22 samples
+#215 CHROMs
+#9,423 variants
+#Object size: 3.4 Mb
+#0 percent missing data
+```
+
+```{r Roussets a Masig19}
+masig19_rousset_a <- read.table("Masig19_rousset_a.txt")
+class(masig19_rousset_a)
+
+masig19_rousset_a_matrix <- as.matrix(masig19_rousset_a)
+View(masig19_rousset_a_matrix)
+
+#dist format
+dist_masig19_rousset_a_matrix <- as.dist(masig19_rousset_a)
+```
+
+```{r geosphere masig19}
+masig19indtest <- read.delim("masig2019_geo.txt", header = F)
+
+row.names(masig19indtest) <- masig19indtest$V1
+masig19indtest <- masig19indtest[,-1]
+
+masig19indtest <- cbind(masig19indtest$V2,masig19indtest$V3)
+
+#regular dist
+dist_masig19indtest <- distm(masig19indtest)
+View(dist_masig19indtest)
+plot(dist_masig19indtest)
+
+#haversine dist - use this one
+
+dist_masig19indtest_haversine <- distm(masig19indtest, fun = distHaversine)
+View(dist_masig19indtest_haversine)
+plot(dist_masig19indtest_haversine)
+
+#log Haversine
+
+log_dist_masig19indtest_haversine <- log(dist_masig19indtest_haversine)
+plot(log_dist_masig19indtest_haversine)
+
+#change -Inf to 0 
+log_dist_masig19indtest_haversine[which(!is.finite(log_dist_masig19indtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_masig19indtest_haversine <- as.dist(log_dist_masig19indtest_haversine)
+str(dist_log_dist_masig19indtest_haversine)
+hist(dist_log_dist_masig19indtest_haversine)
+summary(dist_log_dist_masig19indtest_haversine)
+```
+
+```{r mantel Masig19}
+#genetic is "dist_masig19_rousset_a_matrix"
+#geo is "dist_log_dist_masig19indtest_haversine"
+
+masig19_22_mantel <- mantel.randtest(dist_masig19_rousset_a_matrix, dist_log_dist_masig19indtest_haversine, nrepet = 99999)
+masig19_22_mantel
+
+#scatter
+vect_masig19_gen <- as.vector(dist_masig19_rousset_a_matrix)
+vect_masig19_geo <- as.vector(dist_log_dist_masig19indtest_haversine)
+
+#combine
+masig19_geo_gen_df <- data.frame(vect_masig19_gen,vect_masig19_geo)
+
+library(ggplot2)
+masig19_scatter <- ggplot(masig19_geo_gen_df, aes(y = vect_masig19_gen, x=vect_masig19_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)", title = "Masig Island (2019) Mantel test") + geom_point() + geom_smooth(method = "lm")
+masig19_scatter
+ggplotly()
+
+#lm 
+
+masig19_22_lm <- lm(formula = vect_masig19_gen~vect_masig19_geo)
+summary(masig19_22_lm)
+
+#write a function to plot stats on this graph
+
+ggplotregression_masig19 <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Masig Island (2019) Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotregression_masig19(masig19_22_lm)
+ggplotly() %>% layout(title = paste0("Masig Island (2019) Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = -0.004, Intercept = 0.14, Slope = 0.0008, p = 0.79',
+                                    '</sup>'))
+
+
+#html produced
+#no evidence of IBD - straight line essentially. p value high (0.799)
+
+```
+
+```{r masig19 Roussets at <50m vs Roussets a >500m}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_masig19_22_geo_gen_df <- data.frame(vect_masig19_gen,vect_masig19_geo)
+
+masig19_subset_test_lower <- subset(m_masig19_22_geo_gen_df, vect_masig19_geo < 3.912023)
+masig19_subset_test_upper <- subset(m_masig19_22_geo_gen_df, vect_masig19_geo > 6.214608)
+
+masig19_table_lower <- describe(masig19_subset_test_lower$vect_masig19_gen)
+View(masig19_table_lower)
+masig19_table_upper <- describe(masig19_subset_test_upper$vect_masig19_gen)
+View(masig19_table_upper)
+
+masig19_new_df_roussets_a_distance <- bind_rows(masig19_table_lower,masig19_table_upper)
+
+tab_df(masig19_new_df_roussets_a_distance, title = "masig19 rousset's a variation with distance", file = "masig19  data table test.doc")
+```
+
+```{r vcf StPauls, eval=FALSE}
+vcfstpauls19 <- read.vcfR("stpauls22.phasimp.recode.vcf", verbose = F)
+View(vcfstpauls19)
+
+stpaulsgenid <- vcfR2genind(vcfstpauls19)
+class(vcfstpauls19)
+vcfstpauls19
+
+# ***** Object of Class vcfR *****
+# 22 samples
+# 221 CHROMs
+# 8,575 variants
+# Object size: 3.1 Mb
+# 0 percent missing data
+
+```
+
+```{r Stpauls rousset a}
+stpauls_rousset_a <- read.table("StPauls_rousset_a.txt")
+class(stpauls_rousset_a)
+
+stpauls_rousset_a_matrix <- as.matrix(stpauls_rousset_a)
+View(stpauls_rousset_a_matrix)
+
+#dist format
+dist_stpauls_rousset_a_matrix <- as.dist(stpauls_rousset_a)
+```
+
+```{r Stpauls geosphere}
+stpaulsindtest <- read.delim("StPauls_geo.txt", header = F)
+
+row.names(stpaulsindtest) <- stpaulsindtest$V1
+stpaulsindtest <- stpaulsindtest[,-1]
+
+stpaulsindtest <- cbind(stpaulsindtest$V2,stpaulsindtest$V3)
+
+#regular dist
+dist_stpaulsindtest <- distm(stpaulsindtest)
+View(dist_stpaulsindtest)
+plot(dist_stpaulsindtest)
+
+#haversine dist - use this one
+
+dist_stpaulsindtest_haversine <- distm(stpaulsindtest, fun = distHaversine)
+View(dist_stpaulsindtest_haversine)
+plot(dist_stpaulsindtest_haversine)
+
+#log Haversine
+
+log_dist_stpaulsindtest_haversine <- log(dist_stpaulsindtest_haversine)
+plot(log_dist_stpaulsindtest_haversine)
+
+#change -Inf to 0 
+log_dist_stpaulsindtest_haversine[which(!is.finite(log_dist_stpaulsindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_stpaulsindtest_haversine <- as.dist(log_dist_stpaulsindtest_haversine)
+str(dist_log_dist_stpaulsindtest_haversine)
+hist(dist_log_dist_stpaulsindtest_haversine)
+summary(dist_log_dist_stpaulsindtest_haversine)
+```
+
+```{r stpauls mantel}
+# gen is dist_stpauls_rousset_a_matrix
+# geo is dist_log_dist_stpaulsindtest_haversine
+
+stpauls_mantel <- mantel.randtest(dist_stpauls_rousset_a_matrix, dist_log_dist_stpaulsindtest_haversine, nrepet = 99999)
+stpauls_mantel
+
+#scatter
+vect_stpauls_gen <- as.vector(dist_stpauls_rousset_a_matrix)
+vect_stpauls_geo <- as.vector(dist_log_dist_stpaulsindtest_haversine)
+
+#combine
+stpauls_geo_gen_df <- data.frame(vect_stpauls_gen,vect_stpauls_geo)
+
+library(ggplot2)
+stpauls_scatter <- ggplot(stpauls_geo_gen_df, aes(y = vect_stpauls_gen, x=vect_stpauls_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)",title = "StPauls (Moa Island) Mantel test") + geom_point() + geom_smooth(method = "lm")
+stpauls_scatter
+
+#write a function to plot stats on this graph
+
+ggplotRegression <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "StPauls (Moa Island) Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+stpauls_22_lm <- lm(formula = vect_stpauls_gen~vect_stpauls_geo)
+ggplotRegression(stpauls_22_lm)
+ggplotly() %>% layout(title = paste0("StPauls (Moa Island) Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = -0.0042, Intercept = 0.19, Slope = 0.0014, p = 0.84',
+                                    '</sup>'))
+
+#lm
+stpauls_22_lm <- lm(formula = vect_stpauls_gen~vect_stpauls_geo)
+summary(stpauls_22_lm)
+
+#html produced
+#mosnter p value. No evidence of IBD
+```
+
+```{r}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) - log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_stpauls_22_geo_gen_df <- data.frame(vect_stpauls_gen,vect_stpauls_geo)
+
+stpauls_subset_test_lower <- subset(m_stpauls_22_geo_gen_df, vect_stpauls_geo < 3.912023)
+stpauls_subset_test_upper <- subset(m_stpauls_22_geo_gen_df, vect_stpauls_geo > 6.214608)
+
+stpauls_table_lower <- describe(stpauls_subset_test_lower$vect_stpauls_gen)
+View(stpauls_table_lower)
+stpauls_table_upper <- describe(stpauls_subset_test_upper$vect_stpauls_gen)
+View(stpauls_table_lower)
+
+stpauls_new_df_roussets_a_distance <- bind_rows(stpauls_table_lower,stpauls_table_upper)
+
+tab_df(stpauls_new_df_roussets_a_distance, title = "stPauls rousset's a variation with distance", file = "StPauls data table test.doc")
+
+```
+
+```{r vcf mabuiag, eval=FALSE}
+vcfmabuiag <- read.vcfR("mabuiag22.phasimp.recode.vcf", verbose = F)
+View(vcfmabuiag)
+
+mabuiaggenid <- vcfR2genind(vcfmabuiag)
+class(vcfmabuiag)
+vcfmabuiag
+
+# ***** Object of Class vcfR *****
+# 22 samples
+# 219 CHROMs
+# 8,397 variants
+# Object size: 3 Mb
+# 0 percent missing data
+```
+
+```{r mabuiag Roussets a}
+mabuiag_rousset_a <- read.table("Mabuiag_Rousset_a.txt")
+class(mabuiag_rousset_a)
+
+mabuiag_rousset_a_matrix <- as.matrix(mabuiag_rousset_a)
+View(mabuiag_rousset_a_matrix)
+
+#dist format
+dist_mabuiag_rousset_a_matrix <- as.dist(mabuiag_rousset_a)
+
+```
+
+```{r mabuiag geosphere}
+mabuiagindtest <- read.delim("Mabuiag_geo.txt", header = F)
+
+row.names(mabuiagindtest) <- mabuiagindtest$V1
+mabuiagindtest <- mabuiagindtest[,-1]
+
+mabuiagindtest <- cbind(mabuiagindtest$V2,mabuiagindtest$V3)
+
+#regular dist
+dist_mabuiagindtest <- distm(mabuiagindtest)
+View(dist_mabuiagindtest)
+plot(dist_mabuiagindtest)
+
+#haversine dist - use this one
+
+dist_mabuiagindtest_haversine <- distm(mabuiagindtest, fun = distHaversine)
+View(dist_mabuiagindtest_haversine)
+plot(dist_mabuiagindtest_haversine)
+
+#log Haversine
+
+log_dist_mabuiagindtest_haversine <- log(dist_mabuiagindtest_haversine)
+plot(log_dist_mabuiagindtest_haversine)
+
+#change -Inf to 0 
+log_dist_mabuiagindtest_haversine[which(!is.finite(log_dist_mabuiagindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_mabuiagindtest_haversine <- as.dist(log_dist_mabuiagindtest_haversine)
+str(dist_log_dist_mabuiagindtest_haversine)
+hist(dist_log_dist_mabuiagindtest_haversine)
+summary(dist_log_dist_mabuiagindtest_haversine)
+```
+
+```{r mabuiag mantel}
+#gen is "dist_mabuiag_rousset_a_matrix"
+#geo is "dist_log_dist_mabuiagindtest_haversine"
+
+mabuiag_mantel <- mantel.randtest(dist_mabuiag_rousset_a_matrix,dist_log_dist_mabuiagindtest_haversine, nrepet = 99999)
+mabuiag_mantel
+
+#scatter
+vect_mabuiag_gen <- as.vector(dist_mabuiag_rousset_a_matrix)
+vect_mabuiag_geo <- as.vector(dist_log_dist_mabuiagindtest_haversine)
+
+#combine
+mabuiag_geo_gen_df <- data.frame(vect_mabuiag_gen,vect_mabuiag_geo)
+
+library(ggplot2)
+mabuiag_scatter <- ggplot(mabuiag_geo_gen_df, aes(y = vect_mabuiag_gen, x=vect_mabuiag_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)",title = "Mabuiag Island Mantel test") + geom_point() + geom_smooth(method = "lm")
+mabuiag_scatter
+ggplotly()
+
+ggplotRegression_mabuiag <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Mabuiag Island Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+mabuiag_22_lm <- lm(formula = vect_mabuiag_gen~vect_mabuiag_geo)
+ggplotRegression(mabuiag_22_lm)
+ggplotly() %>% layout(title = paste0("Mabuiag Island Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.001, Intercept = 0.15, Slope = 0.0049, p = 0.27',
+                                    '</sup>'))
+
+
+
+#lm
+mabuiag_22_lm <- lm(formula = vect_mabuiag_gen~vect_mabuiag_geo)
+summary(mabuiag_22_lm)
+#html produced
+#once again, a high p value. no evidence of IBD.
+```
+
+```{r}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+m_mabuiag_22_geo_gen_df <- data.frame(vect_mabuiag_gen,vect_mabuiag_geo)
+
+mabuiag_subset_test_lower <- subset(m_mabuiag_22_geo_gen_df, vect_mabuiag_geo < 3.912023)
+mabuiag_subset_test_upper <- subset(m_mabuiag_22_geo_gen_df, vect_mabuiag_geo > 6.214608)
+
+mabuiag_table_lower <- describe(mabuiag_subset_test_lower$vect_mabuiag_gen)
+View(mabuiag_table_lower)
+mabuiag_table_upper <- describe(mabuiag_subset_test_upper$vect_mabuiag_gen)
+View(mabuiag_table_upper)
+
+mabuiag_new_df_roussets_a_distance <- bind_rows(mabuiag_table_lower,mabuiag_table_upper)
+
+tab_df(mabuiag_new_df_roussets_a_distance, title = "Mabuiag rousset's a variation with distance", file = "Mabuiag data table test.doc")
+
+```
+
+```{r vcf Iama, eval=FALSE}
+vcfiama <- read.vcfR("iama22.phasimp.recode.vcf", verbose = F)
+View(vcfiama)
+
+
+iamagenid <- vcfR2genind(vcfiama)
+class(vcfiama)
+vcfiama
+
+# ***** Object of Class vcfR *****
+# 22 samples
+# 216 CHROMs
+# 7,877 variants
+# Object size: 2.8 Mb
+# 0 percent missing data
+```
+
+```{r Iama Roussets a}
+iama_rousset_a <- read.table("Iama_rousset_a.txt")
+class(iama_rousset_a)
+
+iama_rousset_a_matrix <- as.matrix(iama_rousset_a)
+View(iama_rousset_a_matrix)
+
+#dist format
+dist_iama_rousset_a_matrix <- as.dist(iama_rousset_a)
+```
+
+```{r Iama geosphere}
+iamaindtest <- read.delim("Iama_geo.txt", header = F)
+
+row.names(iamaindtest) <- iamaindtest$V1
+iamaindtest <- iamaindtest[,-1]
+
+iamaindtest <- cbind(iamaindtest$V2,iamaindtest$V3)
+
+#regular dist
+dist_iamaindtest <- distm(iamaindtest)
+View(dist_iamaindtest)
+plot(dist_iamaindtest)
+
+#haversine dist - use this one
+
+dist_iamaindtest_haversine <- distm(iamaindtest, fun = distHaversine)
+View(dist_iamaindtest_haversine)
+plot(dist_iamaindtest_haversine)
+
+#log Haversine
+
+log_dist_iamaindtest_haversine <- log(dist_iamaindtest_haversine)
+plot(log_dist_iamaindtest_haversine)
+
+#change -Inf to 0 
+log_dist_iamaindtest_haversine[which(!is.finite(log_dist_iamaindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_iamaindtest_haversine <- as.dist(log_dist_iamaindtest_haversine)
+str(dist_log_dist_iamaindtest_haversine)
+hist(dist_log_dist_iamaindtest_haversine)
+summary(dist_log_dist_iamaindtest_haversine)
+```
+
+```{r Iama mantel}
+# geo is dist_log_dist_iamaindtest_haversine
+# gen is dist_iama_rousset_a_matrix
+iama22_mantel <- mantel.randtest(dist_iama_rousset_a_matrix,dist_log_dist_iamaindtest_haversine, nrepet = 99999)
+iama22_mantel
+
+#scatter
+vect_Iama_gen <- as.vector(dist_iama_rousset_a_matrix)
+vect_Iama_geo <- as.vector(dist_log_dist_iamaindtest_haversine)
+
+#combine
+iama_geo_gen_df <- data.frame(vect_Iama_gen,vect_Iama_geo)
+
+library(ggplot2)
+iama_scatter <- ggplot(iama_geo_gen_df, aes(y = vect_Iama_gen, x=vect_Iama_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)",title = "Iama Island Mantel test") + geom_point() + geom_smooth(method = "lm")
+iama_scatter
+ggplotly()
+
+#lm 
+iama_22_lm <- lm(formula = vect_Iama_gen~vect_Iama_geo)
+summary(iama_22_lm)
+
+ggplotRegression_iama <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Iama Island Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+iama_22_lm <- lm(formula = vect_Iama_gen~vect_Iama_geo)
+ggplotRegression(iama_22_lm)
+ggplotly() %>% layout(title = paste0("Iama Island Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.069, Intercept = 0.33, Slope = -0.02, p = 0.00003',
+                                    '</sup>'))
+
+
+#appears to potentially be IBD here (low p value). However, some data points are potentially dragging this value down (-0.1 rousset's a). what does a negative rousset's a mean?
+```
+
+```{r Iama NS}
+summary.lm(iama_22_lm)
+confint.lm(iama_22_lm, level = 0.95)
+#confidence intervals are negative = -0.03671823, -0.01345983
+iama_22_lm_coefficient <- iama_22_lm$coefficients[2]
+
+View(iama_22_lm_coefficient)
+# slope is -0.02508903
+
+Iama22_NS <- 1/-0.02508903
+View(Iama22_NS)
+#39 individuals
+
+#taking the inverse of the coefficients
+Iama22_NS_CIs1 <- 1/0.01345983
+#27 individuals  
+  
+Iama22_NS_CIs2 <- 1/0.03671823
+#74 individuals
+
+#NS is 39 individuals (27 - 74 95% CIs)
+
+```
+
+```{r}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+log(50) #log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+log(500) #log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_iama_22_geo_gen_df <- data.frame(vect_Iama_gen,vect_Iama_geo)
+
+Iama_subset_test_lower <- subset(m_iama_22_geo_gen_df, vect_Iama_geo < 3.912023)
+Iama_subset_test_upper <- subset(m_iama_22_geo_gen_df, vect_Iama_geo > 6.214608)
+
+iama_table_lower <- describe(Iama_subset_test_lower$vect_Iama_gen)
+View(iama_table_lower)
+iama_table_upper <- describe(Iama_subset_test_upper$vect_Iama_gen)
+View(iama_table_upper)
+
+iama_new_df_roussets_a_distance <- bind_rows(iama_table_lower,iama_table_upper)
+
+tab_df(iama_new_df_roussets_a_distance, title = "Iama rousset's a variation with distance", file = "Iama data table test.doc")
+
+```
+
+```{r Kubin vcf, eval=FALSE}
+vcfkubin <- read.vcfR("kubin22.phasimp.recode.vcf", verbose = F)
+View(vcfkubin)
+
+kubingenid <- vcfR2genind(vcfkubin)
+class(vcfkubin)
+vcfkubin
+# ***** Object of Class vcfR *****
+# 22 samples
+# 221 CHROMs
+# 8,152 variants
+# Object size: 2.9 Mb
+# 0 percent missing data
+```
+
+```{r Kubin Roussets a}
+kubin_rousset_a <- read.table("Kubin_rousset_a.txt")
+class(kubin_rousset_a)
+
+kubin_rousset_a_matrix <- as.matrix(kubin_rousset_a)
+View(kubin_rousset_a_matrix)
+
+#dist format
+dist_kubin_rousset_a_matrix <- as.dist(kubin_rousset_a)
+
+```
+
+```{r Kubin geosphere}
+kubinindtest <- read.delim("Kubin_geo.txt", header = F)
+
+row.names(kubinindtest) <- kubinindtest$V1
+kubinindtest <- kubinindtest[,-1]
+
+kubinindtest <- cbind(kubinindtest$V2,kubinindtest$V3)
+
+#regular dist
+dist_kubinindtest <- distm(kubinindtest)
+View(dist_kubinindtest)
+plot(dist_kubinindtest)
+
+#haversine dist - use this one
+
+dist_kubinindtest_haversine <- distm(kubinindtest, fun = distHaversine)
+View(dist_kubinindtest_haversine)
+plot(dist_kubinindtest_haversine)
+
+#log Haversine
+
+log_dist_kubinindtest_haversine <- log(dist_kubinindtest_haversine)
+plot(log_dist_kubinindtest_haversine)
+
+#change -Inf to 0 
+log_dist_kubinindtest_haversine[which(!is.finite(log_dist_kubinindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_kubinindtest_haversine <- as.dist(log_dist_kubinindtest_haversine)
+str(dist_log_dist_kubinindtest_haversine)
+hist(dist_log_dist_kubinindtest_haversine)
+summary(dist_log_dist_kubinindtest_haversine)
+
+```
+
+```{r Kubin mantel}
+# geo is dist_log_dist_kubinindtest_haversine
+# gen is dist_kubin_rousset_a_matrix
+kubin22_mantel <- mantel.randtest(dist_kubin_rousset_a_matrix,dist_log_dist_kubinindtest_haversine, nrepet = 99999)
+kubin22_mantel
+
+#scatter
+vect_kubin_gen <- as.vector(dist_kubin_rousset_a_matrix)
+vect_kubin_geo <- as.vector(dist_log_dist_kubinindtest_haversine)
+
+#combine
+kubin_geo_gen_df <- data.frame(vect_kubin_gen,vect_kubin_geo)
+
+library(ggplot2)
+kubin_scatter <- ggplot(kubin_geo_gen_df, aes(y = vect_kubin_gen, x=vect_kubin_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)",title = "Kubin (Moa Island) Mantel test") + geom_point() + geom_smooth(method = "lm")
+kubin_scatter
+ggplotly()
+
+#lm 
+kubin_22_lm <- lm(formula = vect_kubin_gen~vect_kubin_geo)
+summary(kubin_22_lm)
+
+ggplotRegression_kubin <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Kubin (Moa Island) Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+kubin_22_lm <- lm(formula = vect_kubin_gen~vect_kubin_geo)
+summary(kubin_22_lm)
+ggplotRegression(kubin_22_lm)
+ggplotly() %>% layout(title = paste0("Kubin (Moa Island) Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.0028, Intercept = 0.23, Slope = -0.008, p = 0.2',
+                                    '</sup>'))
+
+
+#does not appear to affected by IBD - high p 0.2. 
+```
+
+```{r Kubin}
+#Could you run an additional quick comparison for each island – the mean, st.dev, minimum and maximum of ‘a’ scores at 0m separation vs the mean, st.dev, minimum and maximum of ‘a’ scores at >1km separation? You can omit islands without many (e.g. 3 or fewer) scores at 0m.
+
+#Badu_geo_subset <- subset(dist_Baduindtest_haversine_matrix, x = 100)
+#str(dist_Baduindtest_haversine_matrix)
+
+#have geo as vector. #try get geo to not be logged.
+#maybe do not use dist for either.
+#
+## 
+# log(50)
+# log(100)
+# log(1000)
+# log(3000)
+
+#from the above logarithms, 
+
+# log(50) #log 50 is any number < 3.91. 50 relates to 50 m geographic distance
+# log(500) #log (500) is any number > 6.214608. 500 relates to 500 m geographic distance.
+
+m_kubin_22_geo_gen_df <- data.frame(vect_kubin_gen,vect_kubin_geo)
+
+kubin_subset_test_lower <- subset(m_kubin_22_geo_gen_df, vect_kubin_geo < 3.912023)
+kubin_subset_test_upper <- subset(m_kubin_22_geo_gen_df, vect_kubin_geo > 6.214608)
+
+kubin_table_lower <- describe(kubin_subset_test_lower$vect_kubin_gen)
+View(kubin_table_lower)
+kubin_table_upper <- describe(kubin_subset_test_upper$vect_kubin_gen)
+View(kubin_table_upper)
+
+kubin_new_df_roussets_a_distance <- bind_rows(kubin_table_lower,kubin_table_upper)
+
+tab_df(kubin_new_df_roussets_a_distance, title = "Kubin rousset's a variation with distance", file = "Kubin data table test.doc")
+
+```
+
+```{r Ugar vcf, eval=FALSE}
+vcfugar <- read.vcfR("ugar22.phasimp.recode.vcf", verbose = F)
+View(vcfugar)
+
+ugargenid <- vcfR2genind(vcfugar)
+class(vcfugar)
+vcfugar
+
+# ***** Object of Class vcfR *****
+# 22 samples
+# 210 CHROMs
+# 8,600 variants
+# Object size: 3.1 Mb
+# 0 percent missing data
+
+```
+
+```{r ugar Roussets a}
+ugar_rousset_a <- read.table("Ugar_rousset_a.txt")
+class(ugar_rousset_a)
+
+ugar_rousset_a_matrix <- as.matrix(ugar_rousset_a)
+View(ugar_rousset_a_matrix)
+
+#dist format
+dist_ugar_rousset_a_matrix <- as.dist(ugar_rousset_a)
+```
+
+```{r ugar geosphere}
+ugarindtest <- read.delim("Ugar_geo.txt", header = F)
+
+row.names(ugarindtest) <- ugarindtest$V1
+ugarindtest <- ugarindtest[,-1]
+
+ugarindtest <- cbind(ugarindtest$V2,ugarindtest$V3)
+
+#regular dist
+dist_ugarindtest <- distm(ugarindtest)
+View(dist_ugarindtest)
+plot(dist_ugarindtest)
+
+#haversine dist - use this one
+
+dist_ugarindtest_haversine <- distm(ugarindtest, fun = distHaversine)
+View(dist_ugarindtest_haversine)
+plot(dist_ugarindtest_haversine)
+
+#log Haversine
+
+log_dist_ugarindtest_haversine <- log(dist_ugarindtest_haversine)
+plot(log_dist_ugarindtest_haversine)
+
+#change -Inf to 0 
+log_dist_ugarindtest_haversine[which(!is.finite(log_dist_ugarindtest_haversine))] <- 0
+
+#as.dist Haversine
+
+dist_log_dist_ugarindtest_haversine <- as.dist(log_dist_ugarindtest_haversine)
+str(dist_log_dist_ugarindtest_haversine)
+hist(dist_log_dist_ugarindtest_haversine)
+summary(dist_log_dist_ugarindtest_haversine)
+
+```
+
+```{r ugar mantel}
+# geo is dist_log_dist_ugarindtest_haversine
+# gen is dist_ugar_rousset_a_matrix
+ugar22_mantel <- mantel.randtest(dist_ugar_rousset_a_matrix,dist_log_dist_ugarindtest_haversine, nrepet = 99999)
+ugar22_mantel
+
+#scatter
+vect_ugar_gen <- as.vector(dist_ugar_rousset_a_matrix)
+vect_ugar_geo <- as.vector(dist_log_dist_ugarindtest_haversine)
+
+#combine
+ugar_geo_gen_df <- data.frame(vect_ugar_gen,vect_ugar_geo)
+
+library(ggplot2)
+ugar_scatter <- ggplot(ugar_geo_gen_df, aes(y = vect_ugar_gen, x=vect_ugar_geo)) + labs(y="Rousset's a", x= "Geographical distance (natural log)",title = "Ugar Island Mantel test") + geom_point() + geom_smooth(method = "lm")
+ugar_scatter
+ggplotly()
+
+#lm 
+ugar_22_lm <- lm(formula = vect_ugar_gen~vect_ugar_geo)
+summary(ugar_22_lm)
+
+ggplotRegression_ugar <- function (fit) {
+  require(ggplot2)
+ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "blue") +
+  labs(y="Rousset's a", x= "Geographical distance (natural log)",
+       title = "Ugar Island Mantel test",
+       subtitle = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ugar_22_lm <- lm(formula = vect_ugar_gen~vect_ugar_geo)
+summary(ugar_22_lm)
+ggplotRegression(ugar_22_lm)
+ggplotly() %>% layout(title = paste0("Ugar Island Mantel test",
+                                    '<br>',
+                                    '<sup>',
+                                    'Adj R<sup>2</sup> = 0.017, Intercept = 0.26, Slope = -0.01, p = 0.03',
+                                    '</sup>'))
+
+#quite a lot of variation here. It does appear that there could be IBD (or some other isolation thing).
+```
+
+```{r Ugar NS}
+summary.lm(ugar_22_lm)
+confint.lm(ugar_22_lm, level = 0.95)
+#CIs are negative = -0.02322265, -0.001469988
+ugar_22_lm_coefficient <- ugar_22_lm$coefficients[2]
+View(ugar_22_lm_coefficient)
+#slope is -0.01234632
+
+ugar_22_NS <- 1/-0.01234632
+View(ugar_22_NS)
+# individuals is 80.9
+
+#taking the inverse of the coefficients
+ugar_22_NS_CIs1 <- 1/-0.02322265
+View(ugar_22_NS_CIs1)
+#43
+
+ugar_22_NS_CIs2 <- 1/-0.001469988
+View(ugar_22_NS_CIs2)
+#680
+
+```
+
+```{r}
+sessionInfo()
+```
